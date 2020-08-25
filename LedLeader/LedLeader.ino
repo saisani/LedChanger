@@ -39,7 +39,8 @@ uint8_t componentsValue;
 bool is400Hz;
 uint8_t components = 3;     // only 3 and 4 are valid values
 
-Adafruit_NeoPixel neopixel = Adafruit_NeoPixel(1, PIN, NEO_RGB);
+int NUM_OF_PIXELS = 1;
+Adafruit_NeoPixel neopixel = Adafruit_NeoPixel(NUM_OF_PIXELS, PIN, NEO_GRB);
 
 // BLE Service
 BLEDfu  bledfu;
@@ -49,10 +50,18 @@ BLEUart bleuart;
 // Central uart client
 BLEClientUart clientUart;
 
-// name of device. change between different devices
-const char* NAME = "Leader0";
-const char* FOLLOWER_NAME = "Follower0";
-uint16_t FOLLOWER_UUID = 0x1234;
+// sets the attributes of the leader and followers
+// const char* NAME = "AlphaLeader";
+// const char* FOLLOWER_NAME = "AlphaFollower";
+// uint16_t FOLLOWER_UUID = 0x3826;
+
+const char* NAME = "BetaLeader";
+const char* FOLLOWER_NAME = "BetaFollower";
+uint16_t FOLLOWER_UUID = 0x1844;
+
+// track connection handle to see if they change?
+uint16_t mobileCHandle = -1;
+uint16_t followerCHandle = -1;
 
 void setup()
 {
@@ -106,6 +115,9 @@ void setup()
 
   // Set up and start advertising
   startAdv();
+
+  // device should start off disconnected to both devices
+  setRed();
 }
 
 void startAdv(void)
@@ -138,122 +150,18 @@ void startAdv(void)
 
 void loop()
 {
-  // do nothing, all the work is done in callback
-  uint8_t str[20+1] = { 0 };
-  if(bleuart.notifyEnabled())
-  {
-    bleuart.read(str, 10);
-  }
-  else
-  {
+  if(!bleuart.notifyEnabled())
     return;
-  }
-  
 
-  // integer for command
-  int command = str[0];
-
-  Serial.println("On Main Loop");
-  Serial.print("[Prph] RX: ");
-  Serial.println(str[0]);
-
-  Serial.print("Whole message: ");
-  for(int i=0; i<10; i++)
-    Serial.println(str[i]);
-  Serial.println();
-
-  // check command
-  switch (command) {
-    case 'V': {   // Get Version
-      commandVersion();
-      break;
-    }
-
-    case 'S': {   // Setup dimensions, components, stride...
-      commandSetup(str);
-      break;
-    }
-
-    case 'C': {   // Clear with color
-      commandClearColor(str);
-      break;
-    }
-
-    case 'B': {   // Set Brightness
-      commandSetBrightness(str);
-      break;
-    }
-          
-    // case 'P': {   // Set Pixel
-    //   commandSetPixel(str);
-    //   break;
-    // }
-
-    case 'I': {   // Receive new image
-      commandImage();
-      break;
-    }
-  }
-
-  if ( clientUart.discovered() )
-  {
-    //clientUart.print(str, 20);
-    clientUart.write(str, 10);
-  }
-
-  delay(10);  
-}
-
-/*------------------------------------------------------------------*/
-/* Peripheral
- *------------------------------------------------------------------*/
-
-void prph_connect_callback(uint16_t conn_handle)
-{
-  // Get the reference to current connection
-  BLEConnection* connection = Bluefruit.Connection(conn_handle);
-
-  char peer_name[32] = { 0 };
-  connection->getPeerName(peer_name, sizeof(peer_name));
-
-  Serial.print("[Prph] Connected to ");
-  Serial.println(peer_name);
-
-  // show on pixel, connection is successful
-  setYellow();
-}
-
-void prph_disconnect_callback(uint16_t conn_handle, uint8_t reason)
-{
-  (void) conn_handle;
-  (void) reason;
-
-  Serial.println();
-  Serial.println("[Prph] Disconnected");
-
-  setRed();
-}
-
-void prph_bleuart_rx_callback(uint16_t conn_handle)
-{
-  (void) conn_handle;
-  return;
-  
-  // Forward data from Mobile to our peripheral
-  // char str[20+1] = { 0 };
+  // read in buffer from mobile device
   uint8_t str[20+1] = { 0 };
-  bleuart.read(str, 20);
+  bleuart.read(str, 10);  
 
   // integer for command
   int command = str[0];
 
-  Serial.print("[Prph] RX: ");
+  Serial.print("Received Command from mobile device: ");
   Serial.println(str[0]);
-
-  Serial.print("Whole message: ");
-  for(int i=0; i<20; i++)
-    Serial.print(str[i]);
-  Serial.println();
 
   // check command
   switch (command) {
@@ -282,22 +190,75 @@ void prph_bleuart_rx_callback(uint16_t conn_handle)
       break;
     }
 
-    case 'I': {   // Receive new image
-      commandImage();
-      break;
-    }
-  }  
-
-  if ( clientUart.discovered() )
-  {
-    //clientUart.print(str, 20);
-    clientUart.write(str, 20);
+    // case 'I': {   // Receive new image
+    //   commandImage();
+    //   break;
+    // }
   }
-  else
+
+  if (clientUart.discovered())
   {
-    bleuart.println("[Prph] Central role not connected");
+    clientUart.write(str, 10);
+  }
+
+  delay(10);  
+}
+
+/*------------------------------------------------------------------*/
+/* Peripheral
+ *------------------------------------------------------------------*/
+
+void prph_connect_callback(uint16_t conn_handle)
+{
+  // Get the reference to current connection
+  BLEConnection* connection = Bluefruit.Connection(conn_handle);
+
+  char peer_name[32] = { 0 };
+  connection->getPeerName(peer_name, sizeof(peer_name));
+
+  Serial.print("[Prph] Connected to ");
+  Serial.printf("Handle: %i\n", conn_handle);
+  Serial.println(peer_name);
+
+  // save new connection handle
+  mobileCHandle = conn_handle;
+
+  checkConnections();
+}
+
+void prph_disconnect_callback(uint16_t conn_handle, uint8_t reason)
+{
+  (void) conn_handle;
+  (void) reason;
+
+  Serial.println();
+  Serial.println("[Prph] Disconnected from Mobile");
+
+  checkConnections();
+
+  // make sure follower device is sent command to reset
+  // to standy
+  if(clientUart.discovered())
+  {
+    uint8_t command[4] = {67, 0, 255, 0};
+    clientUart.write(command, 4);
   }
 }
+
+// Normally callbacks would be used instead of checking every loop
+// void prph_bleuart_rx_callback(uint16_t conn_handle)
+// {
+//   (void) conn_handle;
+
+//   if ( clientUart.discovered() )
+//   {
+//     clientUart.print(str, 20);
+//   }
+//   else
+//   {
+//     bleuart.println("[Prph] Central role not connected");
+//   }
+// }
 
 /*------------------------------------------------------------------*/
 /* Central
@@ -319,20 +280,24 @@ void cent_connect_callback(uint16_t conn_handle)
   connection->getPeerName(peer_name, sizeof(peer_name));
 
   Serial.print("[Cent] Connected to ");
+  Serial.printf("Handle: %i\n", conn_handle);
   Serial.println(peer_name);;
 
   if ( clientUart.discover(conn_handle) )
   {
     // Enable TXD's notify
     clientUart.enableTXD();
-    setGreen();
   }
   else
   {
     // disconnect since we couldn't find bleuart service
     Bluefruit.disconnect(conn_handle);
-    setRed();
-  }  
+  }
+
+  // save follower device handle
+  followerCHandle = conn_handle;
+
+  checkConnections();
 }
 
 void cent_disconnect_callback(uint16_t conn_handle, uint8_t reason)
@@ -341,7 +306,8 @@ void cent_disconnect_callback(uint16_t conn_handle, uint8_t reason)
   (void) reason;
   
   Serial.println("[Cent] Disconnected");
-  setRed();
+  
+  checkConnections();
 }
 
 /**
@@ -400,18 +366,9 @@ void commandVersion() {
 void commandSetup(const uint8_t* buffer) {
   Serial.println(F("Command: Setup"));
 
-  // width = bleuart.read();
-  // height = bleuart.read();
-  // stride = bleuart.read();
-  // componentsValue = bleuart.read();
-  // is400Hz = bleuart.read();
-
-  width = buffer[1];
-  Serial.printf("Width from buffer is: %d\n", width);
-  
-  height = buffer[2];
-  Serial.printf("Height from buffer is: %d\n", height);
-  
+  // attributes for neopixel layout
+  width = buffer[1];  
+  height = buffer[2];  
   stride = buffer[3];
   componentsValue = buffer[4];
   is400Hz = buffer[5];
@@ -443,8 +400,7 @@ void commandSetup(const uint8_t* buffer) {
 void commandSetBrightness(const uint8_t* buffer) {
   Serial.println(F("Command: SetBrightness"));
 
-   // Read value
-  // uint8_t brightness = bleuart.read();
+  // Read value
   uint8_t brightness = buffer[1];
 
   Serial.printf("\tBrightness is %d\n", brightness);
@@ -462,15 +418,10 @@ void commandSetBrightness(const uint8_t* buffer) {
 void commandClearColor(const uint8_t* buffer) {
   Serial.println(F("Command: ClearColor"));
 
-  for(int i=0; i<10;i++)
-    Serial.printf("%d ", buffer[i]);
-  Serial.println();
-
   // Read color
   uint8_t color[MAXCOMPONENTS];
   for (int j = 0; j < components;) {
     if (bleuart.available()) {
-      //color[j] = bleuart.read();
       color[j] = buffer[j+1];
       j++;
     }
@@ -506,8 +457,6 @@ void commandSetPixel(const uint8_t* buffer) {
   Serial.println(F("Command: SetPixel"));
 
   // Read position
-  // uint8_t x = bleuart.read();
-  // uint8_t y = bleuart.read();
   uint8_t x = buffer[1];
   uint8_t y = buffer[2];
 
@@ -517,7 +466,6 @@ void commandSetPixel(const uint8_t* buffer) {
   uint8_t *base_addr = pixelBuffer+pixelDataOffset;
   for (int j = 0; j < components;) {
     if (bleuart.available()) {
-      //*base_addr = bleuart.read();
       *base_addr = buffer[j+2];
       base_addr++;
       j++;
@@ -581,11 +529,46 @@ void sendResponse(char const *response) {
     bleuart.write(response, strlen(response)*sizeof(char));
 }
 
-// Indicators
-void setBlue()
+void checkConnections()
+{
+  bool mobileConnection = Bluefruit.connected(mobileCHandle);
+  bool followerConnection = Bluefruit.connected(followerCHandle);
+
+  Serial.printf("Mobile handle: %i\n", mobileCHandle);
+  Serial.printf("Follower handle:%i\n", followerCHandle);
+
+  Serial.printf("Mobile connection: %i\n", mobileConnection);
+  Serial.printf("Follower connection: %i\n", followerConnection);
+
+  if(mobileConnection && followerConnection)
+    setGreen();
+  else if(mobileConnection)
+    setBlue();
+  else if(followerConnection)
+    setYellow();
+  else
+    setRed();
+}
+
+// Indicators for Status
+void setRed()
 {
   neopixel.setBrightness(255);
-  neopixel.setPixelColor(0, 0, 0, 255);
+  neopixel.setPixelColor(0, 255, 0, 0);
+  neopixel.show();
+}
+
+void setOrange()
+{
+  neopixel.setBrightness(255);
+  neopixel.setPixelColor(0, 255, 165, 0);
+  neopixel.show();
+}
+
+void setYellow()
+{
+  neopixel.setBrightness(255);
+  neopixel.setPixelColor(0, 255, 255, 0);
   neopixel.show();
 }
 
@@ -596,16 +579,9 @@ void setGreen()
   neopixel.show();
 }
 
-void setRed()
+void setBlue()
 {
   neopixel.setBrightness(255);
-  neopixel.setPixelColor(0, 255, 0, 0);
-  neopixel.show();
-}
-
-void setYellow()
-{
-  neopixel.setBrightness(255);
-  neopixel.setPixelColor(0, 255, 255, 0);
+  neopixel.setPixelColor(0, 0, 0, 255);
   neopixel.show();
 }

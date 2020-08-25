@@ -42,7 +42,8 @@ uint8_t componentsValue;
 bool is400Hz;
 uint8_t components = 3;     // only 3 and 4 are valid values
 
-Adafruit_NeoPixel neopixel = Adafruit_NeoPixel();
+int NUM_OF_PIXELS = 1;
+Adafruit_NeoPixel neopixel = Adafruit_NeoPixel(NUM_OF_PIXELS, PIN, NEO_GRB);
 
 // BLE Service
 BLEDfu  bledfu;
@@ -50,8 +51,16 @@ BLEDis  bledis;
 BLEUart bleuart;
 
 // name of device. change between different devices
-const char* NAME = "Follower1";
-uint16_t UUID = 0x1234;
+// const char* NAME = "AlphaFollower";
+// const char* LEADER_NAME = "AlphaLeader";
+// uint16_t UUID = 0x3826;
+
+const char* NAME = "BetaFollower";
+const char* LEADER_NAME = "BetaLeader";
+uint16_t UUID = 0x1844;
+
+// save connection handle here
+uint16_t leaderCHandle = 0;
 
 void setup()
 {
@@ -71,6 +80,7 @@ void setup()
   Bluefruit.setTxPower(4);    // Check bluefruit.h for supported values
   Bluefruit.setName(NAME);
   Bluefruit.Periph.setConnectCallback(connect_callback);
+  Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
 
   // To be consistent OTA DFU should be added first if it exists
   bledfu.begin();
@@ -85,6 +95,9 @@ void setup()
 
   // Set up and start advertising
   startAdv();
+
+  // start off led as red
+  setRed();
 }
 
 void startAdv(void)
@@ -96,7 +109,7 @@ void startAdv(void)
   // Include bleuart 128-bit uuid
   // Bluefruit.Advertising.addService(bleuart);
 
-  // add custom uuid to filter
+  // add custom uuid to for leader device to look for
   Bluefruit.Advertising.addUuid(BLEUuid(UUID));
 
   // Secondary Scan Response packet (optional)
@@ -126,25 +139,34 @@ void connect_callback(uint16_t conn_handle)
   char central_name[32] = { 0 };
   connection->getPeerName(central_name, sizeof(central_name));
 
-  // make sure device can only connect to its corresponding leader
-  //  if(~checkPeerName(central_name))
-  //  {
-  //    Serial.print("Could not connect to incorrect central device: ");
-  //    Serial.println(central_name);
-  //    connection->disconnect();
-  //  }
-
   Serial.print("Connected to ");
+  Serial.printf("Handle: %i\n", conn_handle);
   Serial.println(central_name);
 
+  // check if connecting with correct 
+  if(String(central_name).compareTo(String(LEADER_NAME)))
+  {
+    Serial.printf("Disconnecting from %s\n", central_name);
+    Bluefruit.disconnect(conn_handle);
+    return;
+  }
+
   Serial.println("Please select the 'Neopixels' tab, click 'Connect' and have fun");
+  
+  // save connection to leader device
+  leaderCHandle = conn_handle;
+
+  checkConnections();
 }
 
-bool checkPeerName(char *peerName)
+void disconnect_callback(uint16_t conn_handle, uint8_t reason)
 {
-  String peerNameStr = String(peerName);
-  String nameStr = String(NAME);
-  return peerNameStr.charAt(peerNameStr.length()-1) == nameStr.charAt(nameStr.length()-1);
+  (void) conn_handle;
+  (void) reason;
+
+  Serial.println("Disconnecting");
+
+  checkConnections();
 }
 
 void loop()
@@ -153,6 +175,7 @@ void loop()
   if ( Bluefruit.connected() && bleuart.notifyEnabled() )
   {
     int command = bleuart.read();
+    printf("First character is: %i\n", command);
 
     switch (command) {
       case 'V': {   // Get Version
@@ -378,4 +401,49 @@ void commandImage() {
 void sendResponse(char const *response) {
     Serial.printf("Send Response: %s\n", response);
     bleuart.write(response, strlen(response)*sizeof(char));
+}
+
+void checkConnections()
+{
+  bool leaderConnection = Bluefruit.connected(leaderCHandle);
+  if(leaderConnection)
+    setGreen();
+  else
+    setRed();
+}
+
+// Indicators for Status
+void setRed()
+{
+  neopixel.setBrightness(255);
+  neopixel.setPixelColor(0, 255, 0, 0);
+  neopixel.show();
+}
+
+void setOrange()
+{
+  neopixel.setBrightness(255);
+  neopixel.setPixelColor(0, 255, 165, 0);
+  neopixel.show();
+}
+
+void setYellow()
+{
+  neopixel.setBrightness(255);
+  neopixel.setPixelColor(0, 255, 255, 0);
+  neopixel.show();
+}
+
+void setGreen()
+{
+  neopixel.setBrightness(255);
+  neopixel.setPixelColor(0, 0, 255, 0);
+  neopixel.show();
+}
+
+void setBlue()
+{
+  neopixel.setBrightness(255);
+  neopixel.setPixelColor(0, 0, 0, 255);
+  neopixel.show();
 }
