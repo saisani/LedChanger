@@ -51,10 +51,13 @@ BLEUart bleuart;
 BLEClientUart clientUart;
 
 // sets the attributes of the leader and followers
+
+// uncomment to connect with Alpha Follower
 // const char* NAME = "AlphaLeader";
 // const char* FOLLOWER_NAME = "AlphaFollower";
 // uint16_t FOLLOWER_UUID = 0x3826;
 
+// uncomment to connect with Beta Follower
 const char* NAME = "BetaLeader";
 const char* FOLLOWER_NAME = "BetaFollower";
 uint16_t FOLLOWER_UUID = 0x1844;

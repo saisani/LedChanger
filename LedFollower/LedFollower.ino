@@ -51,10 +51,13 @@ BLEDis  bledis;
 BLEUart bleuart;
 
 // name of device. change between different devices
+
+// uncomment to connect with Alpha Leader
 // const char* NAME = "AlphaFollower";
 // const char* LEADER_NAME = "AlphaLeader";
 // uint16_t UUID = 0x3826;
 
+// uncomment to connect with Beta Leader
 const char* NAME = "BetaFollower";
 const char* LEADER_NAME = "BetaLeader";
 uint16_t UUID = 0x1844;

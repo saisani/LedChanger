@@ -1,8 +1,0 @@
-{
-    "board": "adafruit:nrf52:itsybitsy52840",
-    "configuration": "softdevice=s140v6,debug=l0",
-    "port": "/dev/ttyACM0",
-    "programmer": "AVR ISP",
-    "sketch": "LedFollower.ino",
-    "output": "../ArduinoOutput"
-}
